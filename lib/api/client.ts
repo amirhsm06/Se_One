@@ -1,3 +1,6 @@
+
+    
+  
 /**
  * Thin fetch wrapper around your .NET Web API.
  *
@@ -7,7 +10,12 @@
  * cookie-only, you can ignore the token helpers below entirely.
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+// Normalize the configured base URL to prevent URLs such as
+// https://api.example.com//api/courses when the environment variable ends in `/`.
+const BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
+
 const TOKEN_KEY = "se-one-token";
 const API_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -46,7 +54,11 @@ export async function apiFetch<T>(
     );
   }
 
+  // All API paths are root-relative; collapse accidental leading double slashes.
+  const normalizedPath = `/${path.replace(/^\/+/, "")}`;
+
   const { body, headers, signal, ...rest } = options;
+  const hasBody = body !== undefined;
   const isFormData =
     typeof FormData !== "undefined" && body instanceof FormData;
   const token = getToken();
@@ -65,12 +77,16 @@ export async function apiFetch<T>(
   );
 
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetch(`${BASE_URL}${normalizedPath}`, {
       ...rest,
       signal: controller.signal,
       credentials: "include",
       headers: {
-        ...(!isFormData ? { "Content-Type": "application/json" } : {}),
+        // Do not add Content-Type to bodyless GET requests. This avoids an
+        // unnecessary CORS preflight for public, unauthenticated API reads.
+        ...(hasBody && !isFormData
+          ? { "Content-Type": "application/json" }
+          : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...headers,
       },
@@ -113,5 +129,4 @@ export async function apiFetch<T>(
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener("abort", forwardAbort);
-  }
-}
+
